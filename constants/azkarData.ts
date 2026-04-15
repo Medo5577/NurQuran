@@ -5,7 +5,8 @@ export interface Dhikr {
   transliteration: string;
   translation: string;
   count: number;
-  virtue: string;
+  virtue?: string;
+  reference?: string;
   category: string;
 }
 

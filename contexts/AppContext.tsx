@@ -1,6 +1,7 @@
 // Powered by OnSpace.AI
-import React, { createContext, useState, useContext, ReactNode, useCallback } from 'react';
-import { MORNING_AZKAR, EVENING_AZKAR, Dhikr } from '@/constants/azkarData';
+import React, { createContext, useState, useContext, useCallback, useEffect, ReactNode } from 'react';
+import { Storage } from '@/services/storageService';
+import type { Dhikr } from '@/constants/azkarData';
 
 export interface BookmarkedVerse {
   surahId: number;
@@ -22,19 +23,20 @@ interface AppContextType {
   addBookmark: (verse: BookmarkedVerse) => void;
   removeBookmark: (surahId: number, verseNumber: number) => void;
   isBookmarked: (surahId: number, verseNumber: number) => boolean;
-  
+
   // Favorite Azkar
   favoriteAzkar: FavoriteAzkar[];
   toggleFavoriteAzkar: (dhikr: Dhikr) => void;
   isAzkarFavorite: (id: number) => boolean;
-  
+
   // Last Read
   lastReadSurah: number | null;
   setLastReadSurah: (id: number) => void;
-  
+
   // Settings
   selectedTranslation: string;
   setSelectedTranslation: (t: string) => void;
+  translationEdition: string;
   showTransliteration: boolean;
   setShowTransliteration: (v: boolean) => void;
   arabicFontSize: number;
@@ -46,45 +48,103 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [bookmarks, setBookmarks] = useState<BookmarkedVerse[]>([]);
   const [favoriteAzkar, setFavoriteAzkar] = useState<FavoriteAzkar[]>([]);
-  const [lastReadSurah, setLastReadSurah] = useState<number | null>(null);
-  const [selectedTranslation, setSelectedTranslation] = useState('English - Sahih International');
-  const [showTransliteration, setShowTransliteration] = useState(true);
-  const [arabicFontSize, setArabicFontSize] = useState(26);
+  const [lastReadSurah, setLastReadSurahState] = useState<number | null>(null);
+  const [selectedTranslation, setSelectedTranslationState] = useState('Sahih International');
+  const [translationEdition, setTranslationEdition] = useState('en.sahih');
+  const [showTransliteration, setShowTransliterationState] = useState(true);
+  const [arabicFontSize, setArabicFontSizeState] = useState(26);
+
+  // Load persisted state on mount
+  useEffect(() => {
+    (async () => {
+      const [settings, savedBookmarks, savedFaves, lastRead] = await Promise.all([
+        Storage.getSettings(),
+        Storage.getBookmarks(),
+        Storage.getFavoriteAzkar(),
+        Storage.getLastRead(),
+      ]);
+      setSelectedTranslationState(settings.selectedTranslation);
+      setTranslationEdition(settings.translationEdition);
+      setShowTransliterationState(settings.showTransliteration);
+      setArabicFontSizeState(settings.arabicFontSize);
+      if (savedBookmarks.length > 0) setBookmarks(savedBookmarks);
+      if (savedFaves.length > 0) setFavoriteAzkar(savedFaves);
+      if (lastRead) setLastReadSurahState(lastRead.surahId);
+    })();
+  }, []);
 
   const addBookmark = useCallback((verse: BookmarkedVerse) => {
     setBookmarks(prev => {
       const exists = prev.some(b => b.surahId === verse.surahId && b.verseNumber === verse.verseNumber);
       if (exists) return prev;
-      return [{ ...verse, addedAt: new Date() }, ...prev];
+      const updated = [{ ...verse, addedAt: new Date() }, ...prev];
+      Storage.saveBookmarks(updated);
+      return updated;
     });
   }, []);
 
   const removeBookmark = useCallback((surahId: number, verseNumber: number) => {
-    setBookmarks(prev => prev.filter(b => !(b.surahId === surahId && b.verseNumber === verseNumber)));
+    setBookmarks(prev => {
+      const updated = prev.filter(b => !(b.surahId === surahId && b.verseNumber === verseNumber));
+      Storage.saveBookmarks(updated);
+      return updated;
+    });
   }, []);
 
-  const isBookmarked = useCallback((surahId: number, verseNumber: number) => {
-    return bookmarks.some(b => b.surahId === surahId && b.verseNumber === verseNumber);
-  }, [bookmarks]);
+  const isBookmarked = useCallback((surahId: number, verseNumber: number) =>
+    bookmarks.some(b => b.surahId === surahId && b.verseNumber === verseNumber),
+  [bookmarks]);
 
   const toggleFavoriteAzkar = useCallback((dhikr: Dhikr) => {
     setFavoriteAzkar(prev => {
       const exists = prev.some(f => f.dhikr.id === dhikr.id);
-      if (exists) return prev.filter(f => f.dhikr.id !== dhikr.id);
-      return [{ dhikr, addedAt: new Date() }, ...prev];
+      const updated = exists
+        ? prev.filter(f => f.dhikr.id !== dhikr.id)
+        : [{ dhikr, addedAt: new Date() }, ...prev];
+      Storage.saveFavoriteAzkar(updated);
+      return updated;
     });
   }, []);
 
-  const isAzkarFavorite = useCallback((id: number) => {
-    return favoriteAzkar.some(f => f.dhikr.id === id);
-  }, [favoriteAzkar]);
+  const isAzkarFavorite = useCallback((id: number) =>
+    favoriteAzkar.some(f => f.dhikr.id === id),
+  [favoriteAzkar]);
+
+  const setLastReadSurah = useCallback((id: number) => {
+    setLastReadSurahState(id);
+    Storage.saveLastRead(id, 1);
+  }, []);
+
+  const setSelectedTranslation = useCallback((t: string) => {
+    const editionMap: Record<string, string> = {
+      'Sahih International': 'en.sahih',
+      'Yusuf Ali': 'en.yusufali',
+      'Pickthall': 'en.pickthall',
+      'Dr. Mustafa Khattab': 'en.khattab',
+      'Transliteration': 'en.transliteration',
+    };
+    const edition = editionMap[t] ?? 'en.sahih';
+    setSelectedTranslationState(t);
+    setTranslationEdition(edition);
+    Storage.saveSettings({ selectedTranslation: t, translationEdition: edition });
+  }, []);
+
+  const setShowTransliteration = useCallback((v: boolean) => {
+    setShowTransliterationState(v);
+    Storage.saveSettings({ showTransliteration: v });
+  }, []);
+
+  const setArabicFontSize = useCallback((s: number) => {
+    setArabicFontSizeState(s);
+    Storage.saveSettings({ arabicFontSize: s });
+  }, []);
 
   return (
     <AppContext.Provider value={{
       bookmarks, addBookmark, removeBookmark, isBookmarked,
       favoriteAzkar, toggleFavoriteAzkar, isAzkarFavorite,
       lastReadSurah, setLastReadSurah,
-      selectedTranslation, setSelectedTranslation,
+      selectedTranslation, setSelectedTranslation, translationEdition,
       showTransliteration, setShowTransliteration,
       arabicFontSize, setArabicFontSize,
     }}>
@@ -94,7 +154,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAppContext() {
-  const context = useContext(AppContext);
-  if (!context) throw new Error('useAppContext must be used within AppProvider');
-  return context;
+  const ctx = useContext(AppContext);
+  if (!ctx) throw new Error('useAppContext must be used within AppProvider');
+  return ctx;
 }
