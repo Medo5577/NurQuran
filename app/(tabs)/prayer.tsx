@@ -1,7 +1,7 @@
 // Powered by OnSpace.AI
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, ScrollView, StyleSheet, Pressable, ActivityIndicator, Modal,
+  View, Text, ScrollView, StyleSheet, Pressable, ActivityIndicator, Modal, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -10,6 +10,15 @@ import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
 import { usePrayerTimes } from '@/hooks/usePrayerTimes';
 import { CALCULATION_METHODS, HIJRI_MONTHS } from '@/services/prayerService';
 import { CalculationMethodKey } from '@/services/prayerService';
+import {
+  getNotificationSettings,
+  saveNotificationSettings,
+  scheduleAzanNotifications,
+  cancelAllAzanNotifications,
+  sendTestNotification,
+  requestNotificationPermission,
+  AzanNotificationSettings,
+} from '@/services/notificationService';
 import IslamicCard from '@/components/ui/IslamicCard';
 
 function PrayerRow({ prayer, isNext }: { prayer: any; isNext: boolean }) {
@@ -32,14 +41,60 @@ function PrayerRow({ prayer, isNext }: { prayer: any; isNext: boolean }) {
   );
 }
 
+const PRAYER_TOGGLE_KEYS = [
+  { key: 'fajr', label: 'Fajr', arabic: 'الفجر' },
+  { key: 'dhuhr', label: 'Dhuhr', arabic: 'الظهر' },
+  { key: 'asr', label: 'Asr', arabic: 'العصر' },
+  { key: 'maghrib', label: 'Maghrib', arabic: 'المغرب' },
+  { key: 'isha', label: 'Isha', arabic: 'العشاء' },
+] as const;
+
 export default function PrayerScreen() {
   const router = useRouter();
   const { prayerData, loading, error, cityName, calculationMethod, nextPrayerInfo, refresh, changeMethod } = usePrayerTimes();
   const [showMethodModal, setShowMethodModal] = useState(false);
+  const [showAzanModal, setShowAzanModal] = useState(false);
+  const [notifSettings, setNotifSettings] = useState<AzanNotificationSettings | null>(null);
+  const [scheduling, setScheduling] = useState(false);
 
   const mainPrayers = prayerData?.prayers.filter(p => p.name !== 'Sunrise') ?? [];
   const sunrise = prayerData?.prayers.find(p => p.name === 'Sunrise');
   const currentMonth = new Date().getMonth();
+
+  // Load notification settings
+  useEffect(() => {
+    getNotificationSettings().then(setNotifSettings);
+  }, []);
+
+  const toggleNotif = async (key: keyof AzanNotificationSettings, value: boolean) => {
+    if (!notifSettings) return;
+    const updated = { ...notifSettings, [key]: value };
+    setNotifSettings(updated);
+    await saveNotificationSettings({ [key]: value });
+
+    // If enabling, request permission and schedule
+    if (value && key === 'enabled' && prayerData) {
+      setScheduling(true);
+      const granted = await requestNotificationPermission();
+      if (granted) {
+        await scheduleAzanNotifications(mainPrayers);
+        await sendTestNotification();
+      }
+      setScheduling(false);
+    } else if (!value && key === 'enabled') {
+      await cancelAllAzanNotifications();
+    } else if (notifSettings.enabled && prayerData) {
+      // Re-schedule with updated settings
+      await scheduleAzanNotifications(mainPrayers);
+    }
+  };
+
+  // Auto-schedule when prayer data loads
+  useEffect(() => {
+    if (prayerData && notifSettings?.enabled) {
+      scheduleAzanNotifications(mainPrayers).catch(() => {});
+    }
+  }, [prayerData]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -50,11 +105,28 @@ export default function PrayerScreen() {
             <Text style={styles.title}>Prayer Times</Text>
             <Text style={styles.titleAr}>مواقيت الصلاة</Text>
           </View>
-          <Pressable style={styles.locationBtn} onPress={refresh}>
-            <MaterialIcons name="my-location" size={14} color={Colors.primary} />
-            <Text style={styles.locationTxt} numberOfLines={1}>{cityName}</Text>
-            {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
-          </Pressable>
+          <View style={styles.headerActions}>
+            {/* Azan notification toggle button */}
+            <Pressable
+              style={[styles.azanBtn, notifSettings?.enabled && styles.azanBtnActive]}
+              onPress={() => setShowAzanModal(true)}
+              hitSlop={4}
+            >
+              <MaterialIcons
+                name={notifSettings?.enabled ? 'notifications-active' : 'notifications-none'}
+                size={16}
+                color={notifSettings?.enabled ? Colors.background : Colors.primary}
+              />
+              <Text style={[styles.azanBtnText, notifSettings?.enabled && { color: Colors.background }]}>
+                Azan
+              </Text>
+            </Pressable>
+            <Pressable style={styles.locationBtn} onPress={refresh}>
+              <MaterialIcons name="my-location" size={14} color={Colors.primary} />
+              <Text style={styles.locationTxt} numberOfLines={1}>{cityName}</Text>
+              {loading ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
+            </Pressable>
+          </View>
         </View>
 
         {error ? (
@@ -201,6 +273,70 @@ export default function PrayerScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      {/* Azan Notifications Modal */}
+      <Modal visible={showAzanModal} transparent animationType="slide">
+        <Pressable style={styles.modalOverlay} onPress={() => setShowAzanModal(false)}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.azanModalHeader}>
+              <MaterialIcons name="notifications-active" size={24} color={Colors.primary} />
+              <Text style={styles.modalTitle}>Azan Notifications</Text>
+              <Text style={styles.modalTitleAr}>تنبيهات الأذان</Text>
+            </View>
+
+            {notifSettings ? (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {/* Master toggle */}
+                <View style={styles.notifRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.notifLabel}>Enable Azan Alerts</Text>
+                    <Text style={styles.notifDesc}>Receive notification at each prayer time</Text>
+                  </View>
+                  {scheduling ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Switch
+                      value={notifSettings.enabled}
+                      onValueChange={v => toggleNotif('enabled', v)}
+                      trackColor={{ false: Colors.surfaceBorder, true: Colors.primary + '88' }}
+                      thumbColor={notifSettings.enabled ? Colors.primary : Colors.textMuted}
+                    />
+                  )}
+                </View>
+
+                {notifSettings.enabled ? (
+                  <>
+                    <View style={styles.notifDivider} />
+                    <Text style={styles.notifGroupTitle}>Prayer-wise settings</Text>
+                    {PRAYER_TOGGLE_KEYS.map(p => (
+                      <View key={p.key} style={styles.notifRow}>
+                        <Text style={styles.notifLabel}>{p.label}</Text>
+                        <Text style={styles.notifArabic}>{p.arabic}</Text>
+                        <Switch
+                          value={notifSettings[p.key]}
+                          onValueChange={v => toggleNotif(p.key, v)}
+                          trackColor={{ false: Colors.surfaceBorder, true: Colors.primary + '88' }}
+                          thumbColor={notifSettings[p.key] ? Colors.primary : Colors.textMuted}
+                        />
+                      </View>
+                    ))}
+                    <Pressable
+                      style={styles.testBtn}
+                      onPress={() => sendTestNotification()}
+                    >
+                      <MaterialIcons name="notifications" size={16} color={Colors.background} />
+                      <Text style={styles.testBtnText}>Send Test Notification</Text>
+                    </Pressable>
+                  </>
+                ) : null}
+              </ScrollView>
+            ) : (
+              <ActivityIndicator color={Colors.primary} style={{ marginVertical: Spacing.lg }} />
+            )}
+          </View>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -211,14 +347,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
   },
-  title: { fontSize: Typography.h2, fontWeight: Typography.bold, color: Colors.textPrimary },
+  title: { fontSize: Typography.h2, fontWeight: '700', color: Colors.textPrimary },
   titleAr: { fontSize: Typography.caption, color: Colors.primary, marginTop: 2 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  azanBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: Colors.surface, paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: Radius.round, borderWidth: 1, borderColor: Colors.primary + '55',
+  },
+  azanBtnActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  azanBtnText: { fontSize: Typography.small, color: Colors.primary, fontWeight: '600' },
   locationBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: Colors.surface, paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.surfaceBorder, maxWidth: 160,
+    borderRadius: Radius.md, borderWidth: 1, borderColor: Colors.surfaceBorder, maxWidth: 130,
   },
-  locationTxt: { fontSize: Typography.caption, color: Colors.textPrimary, fontWeight: Typography.medium, flex: 1 },
+  locationTxt: { fontSize: Typography.caption, color: Colors.textPrimary, fontWeight: '500', flex: 1 },
   errBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     marginHorizontal: Spacing.md, marginBottom: 4, padding: 8,
@@ -228,19 +372,19 @@ const styles = StyleSheet.create({
   dateCard: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
   dateInner: { flexDirection: 'row', alignItems: 'center', marginBottom: Spacing.md },
   dateLeft: { flex: 1 },
-  hijriDay: { fontSize: 52, fontWeight: Typography.bold, color: Colors.textPrimary, lineHeight: 60 },
-  hijriMonthYear: { fontSize: Typography.h3, color: Colors.primary, fontWeight: Typography.semiBold },
+  hijriDay: { fontSize: 52, fontWeight: '700', color: Colors.textPrimary, lineHeight: 60 },
+  hijriMonthYear: { fontSize: Typography.h3, color: Colors.primary, fontWeight: '600' },
   gregorian: { fontSize: Typography.caption, color: Colors.textSecondary, marginTop: 4 },
   dateDivider: { width: 1, height: 70, backgroundColor: Colors.surfaceBorder, marginHorizontal: Spacing.md },
   dateRight: { alignItems: 'center', gap: 4 },
-  qiblaAngle: { fontSize: Typography.small, color: Colors.primary, fontWeight: Typography.medium },
+  qiblaAngle: { fontSize: Typography.small, color: Colors.primary, fontWeight: '500' },
   countdownBar: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.sm + 2, gap: 6,
   },
-  countdownText: { flex: 1, fontSize: Typography.caption, color: Colors.background, fontWeight: Typography.medium },
+  countdownText: { flex: 1, fontSize: Typography.caption, color: Colors.background, fontWeight: '500' },
   timeLeftBadge: { backgroundColor: Colors.background, borderRadius: Radius.round, paddingHorizontal: 10, paddingVertical: 3 },
-  timeLeftText: { fontSize: Typography.small, fontWeight: Typography.bold, color: Colors.primary },
+  timeLeftText: { fontSize: Typography.small, fontWeight: '700', color: Colors.primary },
   skeleton: { alignItems: 'center', padding: Spacing.xl, gap: Spacing.sm },
   loadingText: { fontSize: Typography.body, color: Colors.textSecondary },
   methodRow: {
@@ -251,10 +395,8 @@ const styles = StyleSheet.create({
   },
   methodText: { flex: 1, fontSize: Typography.small, color: Colors.textSecondary },
   section: { paddingHorizontal: Spacing.md, marginBottom: Spacing.md },
-  sectionTitle: { fontSize: Typography.h4, fontWeight: Typography.semiBold, color: Colors.textPrimary, marginBottom: Spacing.sm },
-  prayerRow: {
-    flexDirection: 'row', alignItems: 'center', padding: Spacing.sm + 4, gap: Spacing.sm,
-  },
+  sectionTitle: { fontSize: Typography.h4, fontWeight: '600', color: Colors.textPrimary, marginBottom: Spacing.sm },
+  prayerRow: { flexDirection: 'row', alignItems: 'center', padding: Spacing.sm + 4, gap: Spacing.sm },
   prayerRowNext: { backgroundColor: Colors.primary },
   prayerIcon: {
     width: 38, height: 38, borderRadius: 19,
@@ -262,34 +404,32 @@ const styles = StyleSheet.create({
   },
   prayerIconNext: { backgroundColor: 'rgba(255,255,255,0.25)' },
   prayerInfo: { flex: 1 },
-  prayerName: { fontSize: Typography.body, fontWeight: Typography.semiBold, color: Colors.textPrimary },
+  prayerName: { fontSize: Typography.body, fontWeight: '600', color: Colors.textPrimary },
   prayerNameNext: { color: Colors.background },
   prayerArabic: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 1 },
-  prayerTime: { fontSize: Typography.body, fontWeight: Typography.bold, color: Colors.primary },
+  prayerTime: { fontSize: Typography.body, fontWeight: '700', color: Colors.primary },
   prayerTimeNext: { color: Colors.background },
-  nextBadge: {
-    backgroundColor: Colors.background, borderRadius: Radius.round, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 4,
-  },
-  nextBadgeText: { fontSize: Typography.small, color: Colors.primary, fontWeight: Typography.bold },
+  nextBadge: { backgroundColor: Colors.background, borderRadius: Radius.round, paddingHorizontal: 8, paddingVertical: 2, marginLeft: 4 },
+  nextBadgeText: { fontSize: Typography.small, color: Colors.primary, fontWeight: '700' },
   prayerDivider: { height: 1, backgroundColor: Colors.surfaceBorder, marginHorizontal: Spacing.sm },
   sunriseRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 4 },
   sunriseText: { fontSize: Typography.caption, color: Colors.warning },
   qiblaCard: { marginHorizontal: Spacing.md, marginBottom: Spacing.md },
   qiblaInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  qiblaTitle: { fontSize: Typography.h4, fontWeight: Typography.semiBold, color: Colors.textPrimary },
+  qiblaTitle: { fontSize: Typography.h4, fontWeight: '600', color: Colors.textPrimary },
   qiblaTitleAr: { fontSize: Typography.caption, color: Colors.primary, marginTop: 2 },
   qiblaSub: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 6 },
   compassIcon: {},
   calendarCard: { marginHorizontal: Spacing.md },
   calendarHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: Spacing.sm },
-  calendarTitle: { fontSize: Typography.body, fontWeight: Typography.semiBold, color: Colors.textPrimary },
+  calendarTitle: { fontSize: Typography.body, fontWeight: '600', color: Colors.textPrimary },
   calendarRow: { flexDirection: 'row', gap: Spacing.xs },
   monthBadge: {
     width: 64, alignItems: 'center', backgroundColor: Colors.surface,
     borderRadius: Radius.sm, padding: 8, borderWidth: 1, borderColor: Colors.surfaceBorder,
   },
   monthActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  monthNum: { fontSize: Typography.caption, color: Colors.textSecondary, fontWeight: Typography.bold },
+  monthNum: { fontSize: Typography.caption, color: Colors.textSecondary, fontWeight: '700' },
   monthNumActive: { color: Colors.background },
   monthName: { fontSize: 9, color: Colors.textMuted, textAlign: 'center', marginTop: 2 },
   monthNameActive: { color: Colors.background },
@@ -302,7 +442,9 @@ const styles = StyleSheet.create({
     width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.surfaceBorder,
     alignSelf: 'center', marginBottom: Spacing.md,
   },
-  modalTitle: { fontSize: Typography.h3, fontWeight: Typography.bold, color: Colors.textPrimary, marginBottom: Spacing.sm },
+  azanModalHeader: { alignItems: 'center', gap: 4, marginBottom: Spacing.md },
+  modalTitle: { fontSize: Typography.h3, fontWeight: '700', color: Colors.textPrimary },
+  modalTitleAr: { fontSize: Typography.caption, color: Colors.primary },
   methodOption: {
     flexDirection: 'row', alignItems: 'center', padding: Spacing.sm + 4,
     borderRadius: Radius.md, marginBottom: 4, gap: Spacing.sm,
@@ -310,4 +452,20 @@ const styles = StyleSheet.create({
   methodOptionActive: { backgroundColor: Colors.overlayLight },
   methodOptionLabel: { fontSize: Typography.body, color: Colors.textPrimary },
   methodOptionAr: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 2 },
+  // Azan notification styles
+  notifRow: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
+    paddingVertical: Spacing.sm + 2,
+    borderBottomWidth: 1, borderBottomColor: Colors.surfaceBorder,
+  },
+  notifLabel: { flex: 1, fontSize: Typography.body, color: Colors.textPrimary },
+  notifArabic: { fontSize: Typography.caption, color: Colors.textSecondary },
+  notifDesc: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 2 },
+  notifDivider: { height: 1, backgroundColor: Colors.surfaceBorder, marginVertical: Spacing.sm },
+  notifGroupTitle: { fontSize: Typography.caption, color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 },
+  testBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: Colors.primary, borderRadius: Radius.md, padding: Spacing.sm + 4, marginTop: Spacing.md,
+  },
+  testBtnText: { fontSize: Typography.body, fontWeight: '700', color: Colors.background },
 });

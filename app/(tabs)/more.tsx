@@ -2,14 +2,14 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, Pressable,
-  Animated, Vibration, Modal, Switch,
+  Animated, Vibration, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
 import { TASBEEH_OPTIONS } from '@/constants/azkarData';
-import { HADITH_COLLECTIONS, FORTY_NAWAWI } from '@/constants/hadithData';
+import { HADITH_COLLECTIONS_META } from '@/services/hadithApiService';
 import { useAppContext } from '@/contexts/AppContext';
 import IslamicCard from '@/components/ui/IslamicCard';
 import GeometricDivider from '@/components/ui/GeometricDivider';
@@ -42,24 +42,34 @@ export default function MoreScreen() {
   const [count, setCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const handleTasbeehPress = useCallback(() => {
-    Vibration.vibrate(25);
+    Vibration.vibrate(20);
     const newCount = count + 1;
     setCount(newCount);
     setTotalCount(prev => prev + 1);
-    Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 0.93, duration: 80, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
-    ]).start();
-    if (newCount >= selectedDhikr.defaultCount) {
-      Vibration.vibrate([0, 50, 50, 50]);
-    }
-  }, [count, selectedDhikr, scaleAnim]);
 
-  const handleReset = () => { setCount(0); Vibration.vibrate(60); };
-  const progress = Math.min(count / selectedDhikr.defaultCount, 1);
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(scaleAnim, { toValue: 0.91, duration: 70, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1.15, duration: 70, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(scaleAnim, { toValue: 1, duration: 160, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 160, useNativeDriver: true }),
+      ]),
+    ]).start();
+
+    if (newCount % selectedDhikr.defaultCount === 0 && newCount > 0) {
+      Vibration.vibrate([0, 60, 60, 60]);
+    }
+  }, [count, selectedDhikr, scaleAnim, pulseAnim]);
+
+  const handleReset = () => { setCount(0); Vibration.vibrate(80); };
+  const progress = (count % selectedDhikr.defaultCount) / selectedDhikr.defaultCount;
   const completed = Math.floor(count / selectedDhikr.defaultCount);
+  const remaining = selectedDhikr.defaultCount - (count % selectedDhikr.defaultCount);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -91,53 +101,70 @@ export default function MoreScreen() {
             <Text style={styles.sectionTitleAr}>المسبحة الرقمية</Text>
           </View>
 
-          {/* Counter */}
+          {/* Selected Dhikr display */}
+          <View style={styles.dhikrDisplay}>
+            <Text style={styles.dhikrDisplayAr}>{selectedDhikr.arabic}</Text>
+            <Text style={styles.dhikrDisplayTranslit}>{selectedDhikr.transliteration}</Text>
+            <Text style={styles.dhikrDisplayEn}>{selectedDhikr.translation}</Text>
+          </View>
+
+          {/* Counter Button */}
           <View style={styles.counterArea}>
             <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-              <Pressable onPress={handleTasbeehPress} style={styles.counterBtn}>
-                <View style={styles.outerRing}>
-                  <View style={[styles.progressArc, {
-                    borderTopColor: Colors.primary,
-                    borderRightColor: progress > 0.25 ? Colors.primary : Colors.surfaceBorder,
-                    borderBottomColor: progress > 0.5 ? Colors.primary : Colors.surfaceBorder,
-                    borderLeftColor: progress > 0.75 ? Colors.primary : Colors.surfaceBorder,
-                  }]} />
+              <Pressable onPress={handleTasbeehPress} style={styles.counterBtnOuter}>
+                {/* Pulse ring */}
+                <Animated.View style={[styles.pulseRing, { transform: [{ scale: pulseAnim }] }]} />
+                {/* Progress arc via border colors */}
+                <View style={[styles.outerRing, {
+                  borderTopColor: Colors.primary,
+                  borderRightColor: progress > 0.25 ? Colors.primary : Colors.surfaceBorder,
+                  borderBottomColor: progress > 0.5 ? Colors.primary : Colors.surfaceBorder,
+                  borderLeftColor: progress > 0.75 ? Colors.primary : Colors.surfaceBorder,
+                }]}>
                   <View style={styles.innerCircle}>
-                    <Text style={styles.countNum}>{count}</Text>
-                    <Text style={styles.countTarget}>/ {selectedDhikr.defaultCount}</Text>
-                    {completed > 0 ? (
-                      <View style={styles.completedBadge}>
-                        <Text style={styles.completedText}>×{completed} done</Text>
-                      </View>
-                    ) : null}
+                    <Text style={styles.countNum}>{count % selectedDhikr.defaultCount === 0 && count > 0 ? '✓' : count % selectedDhikr.defaultCount}</Text>
+                    <Text style={styles.countTarget}>of {selectedDhikr.defaultCount}</Text>
+                    <Text style={styles.remainingText}>{remaining} left</Text>
                   </View>
                 </View>
               </Pressable>
             </Animated.View>
-            <Text style={styles.dhikrArabic}>{selectedDhikr.arabic}</Text>
-            <Text style={styles.dhikrTranslit}>{selectedDhikr.transliteration}</Text>
-            <Text style={styles.dhikrTranslation}>{selectedDhikr.translation}</Text>
+
+            {/* Stats row */}
+            <View style={styles.statsRow}>
+              <View style={styles.statBox}>
+                <Text style={styles.statNum}>{completed}</Text>
+                <Text style={styles.statLabel}>Rounds</Text>
+              </View>
+              <View style={[styles.statBox, styles.statBoxMain]}>
+                <Text style={[styles.statNum, { color: Colors.primary, fontSize: 24 }]}>{totalCount}</Text>
+                <Text style={[styles.statLabel, { color: Colors.textSecondary }]}>Total</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNum}>{selectedDhikr.defaultCount}</Text>
+                <Text style={styles.statLabel}>Target</Text>
+              </View>
+            </View>
 
             {/* Controls */}
             <View style={styles.controls}>
-              <Pressable style={styles.controlBtn} onPress={handleReset}>
-                <MaterialIcons name="refresh" size={22} color={Colors.error} />
+              <Pressable style={[styles.controlBtn, { borderColor: Colors.error + '44' }]} onPress={handleReset}>
+                <MaterialIcons name="refresh" size={20} color={Colors.error} />
                 <Text style={[styles.controlText, { color: Colors.error }]}>Reset</Text>
               </Pressable>
-              <View style={styles.totalBadge}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalNum}>{totalCount.toLocaleString()}</Text>
-              </View>
-              <Pressable style={styles.controlBtn}>
-                <MaterialIcons name="share" size={22} color={Colors.primary} />
-                <Text style={[styles.controlText, { color: Colors.primary }]}>Share</Text>
+              <Pressable
+                style={[styles.controlBtn, { borderColor: Colors.success + '44' }]}
+                onPress={() => { setTotalCount(0); setCount(0); Vibration.vibrate(100); }}
+              >
+                <MaterialIcons name="delete-outline" size={20} color={Colors.success} />
+                <Text style={[styles.controlText, { color: Colors.success }]}>Clear All</Text>
               </Pressable>
             </View>
           </View>
 
           {/* Dhikr Selector */}
           <View style={styles.dhikrList}>
-            <Text style={styles.dhikrListTitle}>Choose Dhikr</Text>
+            <Text style={styles.dhikrListTitle}>Choose Your Dhikr</Text>
             {TASBEEH_OPTIONS.map(opt => (
               <Pressable
                 key={opt.id}
@@ -145,15 +172,22 @@ export default function MoreScreen() {
                 onPress={() => { setSelectedDhikr(opt); setCount(0); }}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.dhikrOptAr, selectedDhikr.id === opt.id && { color: Colors.primary }]}>
+                  <Text style={[styles.dhikrOptAr, selectedDhikr.id === opt.id && { color: Colors.primaryLight }]}>
                     {opt.arabic}
                   </Text>
+                  <Text style={styles.dhikrOptTranslit} numberOfLines={1}>{opt.transliteration}</Text>
                   <Text style={styles.dhikrOptEn}>{opt.translation}</Text>
                 </View>
-                <Text style={styles.dhikrOptCount}>×{opt.defaultCount}</Text>
-                {selectedDhikr.id === opt.id ? (
-                  <MaterialIcons name="check-circle" size={20} color={Colors.primary} />
-                ) : null}
+                <View style={styles.dhikrOptRight}>
+                  <View style={[styles.countChip, selectedDhikr.id === opt.id && styles.countChipActive]}>
+                    <Text style={[styles.dhikrOptCount, selectedDhikr.id === opt.id && { color: Colors.background }]}>
+                      ×{opt.defaultCount}
+                    </Text>
+                  </View>
+                  {selectedDhikr.id === opt.id ? (
+                    <MaterialIcons name="check-circle" size={18} color={Colors.primary} />
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </View>
@@ -167,44 +201,36 @@ export default function MoreScreen() {
             <Text style={styles.sectionTitle}>Hadith Collections</Text>
             <Text style={styles.sectionTitleAr}>مجموعات الحديث</Text>
           </View>
+          <Text style={styles.hadithSubtitle}>
+            Real hadith data sourced from authenticated collections via API
+          </Text>
           <View style={styles.collectionsGrid}>
-            {HADITH_COLLECTIONS.map(col => (
+            {HADITH_COLLECTIONS_META.map(col => (
               <Pressable
                 key={col.id}
-                style={({ pressed }) => [styles.collCard, { borderColor: col.color + '44' }, pressed && { opacity: 0.8 }]}
+                style={({ pressed }) => [styles.collCard, { borderColor: col.color + '55' }, pressed && { opacity: 0.8, transform: [{ scale: 0.96 }] }]}
                 onPress={() => router.push(`/hadith/${col.id}` as any)}
               >
-                <View style={[styles.collDot, { backgroundColor: col.color }]} />
-                <Text style={styles.collName}>{col.name}</Text>
+                <View style={[styles.collHeader, { backgroundColor: col.color + '15' }]}>
+                  <MaterialIcons name="library-books" size={20} color={col.color} />
+                  <View style={[styles.collDot, { backgroundColor: col.color }]} />
+                </View>
+                <Text style={[styles.collName, { color: col.color }]}>{col.name}</Text>
                 <Text style={styles.collAr}>{col.nameArabic}</Text>
-                <Text style={styles.collAuthor}>{col.author}</Text>
-                <Text style={[styles.collCount, { color: col.color }]}>{col.totalHadiths.toLocaleString()} hadiths</Text>
+                <Text style={styles.collAuthor} numberOfLines={2}>{col.author}</Text>
+                <View style={styles.collFooter}>
+                  <Text style={[styles.collCount, { color: col.color }]}>
+                    {col.total.toLocaleString()}
+                  </Text>
+                  <Text style={styles.collCountLabel}> hadiths</Text>
+                </View>
+                <View style={styles.collArrow}>
+                  <MaterialIcons name="arrow-forward" size={14} color={col.color} />
+                </View>
               </Pressable>
             ))}
           </View>
-          <GeometricDivider />
-          <View style={styles.subHeader}>
-            <Text style={styles.sectionTitle}>40 Hadith Nawawi</Text>
-            <Text style={styles.sectionTitleAr}>الأربعون النووية</Text>
-          </View>
-          {FORTY_NAWAWI.map(hadith => (
-            <IslamicCard key={hadith.id} style={styles.hadithCard}>
-              <View style={styles.hadithHeader}>
-                <View style={styles.hadithNum}>
-                  <Text style={styles.hadithNumText}>{hadith.hadithNumber}</Text>
-                </View>
-                <Text style={styles.hadithNarrator}>{hadith.narrator}</Text>
-                <View style={styles.gradeBadge}>
-                  <Text style={styles.gradeText}>{hadith.grade}</Text>
-                </View>
-              </View>
-              <Text style={styles.hadithArabic}>{hadith.arabic}</Text>
-              <Text style={styles.hadithTranslation}>{hadith.translation}</Text>
-              <View style={styles.catBadge}>
-                <Text style={styles.catText}>{hadith.category}</Text>
-              </View>
-            </IslamicCard>
-          ))}
+
           <View style={{ height: Spacing.xl }} />
         </ScrollView>
 
@@ -216,38 +242,30 @@ export default function MoreScreen() {
             <Text style={styles.sectionTitleAr}>الإعدادات</Text>
           </View>
 
-          {/* Radio & TV Link */}
-          <Pressable style={styles.settingLink} onPress={() => router.push('/radio' as any)}>
-            <View style={[styles.settingIcon, { backgroundColor: Colors.error + '22' }]}>
-              <MaterialIcons name="radio" size={20} color={Colors.error} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingLinkTitle}>Quran Radio & TV</Text>
-              <Text style={styles.settingLinkSub}>Stream live Islamic stations</Text>
-            </View>
-            <MaterialIcons name="chevron-right" size={20} color={Colors.textMuted} />
-          </Pressable>
-
-          {/* Qibla Finder Link */}
-          <Pressable style={styles.settingLink} onPress={() => router.push('/qibla' as any)}>
-            <View style={[styles.settingIcon, { backgroundColor: Colors.primary + '22' }]}>
-              <MaterialIcons name="explore" size={20} color={Colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.settingLinkTitle}>Qibla Finder</Text>
-              <Text style={styles.settingLinkSub}>Compass-based Qibla direction</Text>
-            </View>
-            <MaterialIcons name="chevron-right" size={20} color={Colors.textMuted} />
-          </Pressable>
+          {/* Quick Links */}
+          {[
+            { icon: 'radio', label: 'Quran Radio & TV', sub: 'Stream live Islamic stations', route: '/radio', color: Colors.error },
+            { icon: 'explore', label: 'Qibla Finder', sub: 'Compass-based direction', route: '/qibla', color: Colors.primary },
+          ].map(item => (
+            <Pressable key={item.route} style={styles.settingLink} onPress={() => router.push(item.route as any)}>
+              <View style={[styles.settingIcon, { backgroundColor: item.color + '22' }]}>
+                <MaterialIcons name={item.icon as any} size={20} color={item.color} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingLinkTitle}>{item.label}</Text>
+                <Text style={styles.settingLinkSub}>{item.sub}</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={Colors.textMuted} />
+            </Pressable>
+          ))}
 
           <View style={styles.settingGroup}>
             <Text style={styles.settingGroupTitle}>Quran Display</Text>
 
-            {/* Transliteration Toggle */}
             <View style={styles.settingRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.settingLabel}>Show Transliteration</Text>
-                <Text style={styles.settingDesc}>Show pronunciation guide below Arabic</Text>
+                <Text style={styles.settingDesc}>Pronunciation guide below Arabic</Text>
               </View>
               <Switch
                 value={showTransliteration}
@@ -257,30 +275,29 @@ export default function MoreScreen() {
               />
             </View>
 
-            {/* Font Size */}
             <View style={styles.settingRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.settingLabel}>Arabic Font Size</Text>
                 <Text style={styles.settingDesc}>Current: {arabicFontSize}px</Text>
               </View>
               <View style={styles.fontSizeControls}>
-                <Pressable
-                  style={styles.fontBtn}
-                  onPress={() => setArabicFontSize(Math.max(18, arabicFontSize - 2))}
-                >
+                <Pressable style={styles.fontBtn} onPress={() => setArabicFontSize(Math.max(18, arabicFontSize - 2))}>
                   <MaterialIcons name="remove" size={16} color={Colors.textPrimary} />
                 </Pressable>
                 <Text style={styles.fontSizeValue}>{arabicFontSize}</Text>
-                <Pressable
-                  style={styles.fontBtn}
-                  onPress={() => setArabicFontSize(Math.min(40, arabicFontSize + 2))}
-                >
+                <Pressable style={styles.fontBtn} onPress={() => setArabicFontSize(Math.min(44, arabicFontSize + 2))}>
                   <MaterialIcons name="add" size={16} color={Colors.textPrimary} />
                 </Pressable>
               </View>
             </View>
 
-            {/* Translation Picker */}
+            {/* Font size preview */}
+            <View style={styles.fontPreview}>
+              <Text style={[styles.fontPreviewText, { fontSize: arabicFontSize }]}>
+                بِسْمِ اللَّهِ
+              </Text>
+            </View>
+
             <View style={styles.settingBlockLabel}>
               <Text style={styles.settingLabel}>Translation</Text>
             </View>
@@ -300,14 +317,18 @@ export default function MoreScreen() {
             ))}
           </View>
 
-          {/* App Info */}
           <IslamicCard style={styles.aboutCard}>
+            <View style={styles.aboutLogo}>
+              <MaterialIcons name="menu-book" size={32} color={Colors.primary} />
+            </View>
             <Text style={styles.aboutTitle}>NurQuran</Text>
             <Text style={styles.aboutTitleAr}>نور القرآن</Text>
             <Text style={styles.aboutDesc}>
-              Powered by alquran.cloud API, mp3quran.net, and the Adhan prayer calculation library.
+              Quran: alquran.cloud · Audio: mp3quran.net{'\n'}
+              Prayer Times: Adhan Library · Hadith: hadith.gading.dev{'\n'}
+              Adhkar: GitHub JSON API
             </Text>
-            <Text style={styles.aboutVersion}>Version 2.0 • Built with Expo</Text>
+            <Text style={styles.aboutVersion}>Version 3.0 · Built with Expo</Text>
           </IslamicCard>
 
           <View style={{ height: Spacing.xl }} />
@@ -329,83 +350,101 @@ const styles = StyleSheet.create({
     gap: 5, paddingVertical: 9, borderRadius: Radius.md,
   },
   tabActive: { backgroundColor: Colors.primary },
-  tabText: { fontSize: Typography.small, fontWeight: Typography.semiBold, color: Colors.textSecondary },
-  tabTextActive: { color: Colors.background, fontWeight: Typography.bold },
-  sectionHeader: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm },
-  subHeader: { paddingHorizontal: Spacing.md, marginBottom: Spacing.sm },
-  sectionTitle: { fontSize: Typography.h2, fontWeight: Typography.bold, color: Colors.textPrimary },
+  tabText: { fontSize: Typography.small, fontWeight: '600', color: Colors.textSecondary },
+  tabTextActive: { color: Colors.background, fontWeight: '700' },
+  sectionHeader: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xs },
+  sectionTitle: { fontSize: Typography.h2, fontWeight: '700', color: Colors.textPrimary },
   sectionTitleAr: { fontSize: Typography.caption, color: Colors.primary, marginTop: 2 },
-  // Tasbeeh
-  counterArea: { alignItems: 'center', paddingHorizontal: Spacing.md, paddingBottom: Spacing.md },
-  counterBtn: { width: 220, height: 220, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.md },
+
+  // ── Dhikr Display ─────────────────────────────────────────────────────────
+  dhikrDisplay: {
+    alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm,
+    backgroundColor: Colors.surface, marginHorizontal: Spacing.md, marginTop: Spacing.sm,
+    borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.primary + '33',
+  },
+  dhikrDisplayAr: { fontSize: Typography.arabicLG, color: Colors.textArabic, textAlign: 'center', lineHeight: 50 },
+  dhikrDisplayTranslit: { fontSize: Typography.caption, color: Colors.primary, fontStyle: 'italic', textAlign: 'center', marginTop: 2 },
+  dhikrDisplayEn: { fontSize: Typography.body, color: Colors.textSecondary, textAlign: 'center', marginTop: 4 },
+
+  // ── Counter ───────────────────────────────────────────────────────────────
+  counterArea: { alignItems: 'center', paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
+  counterBtnOuter: {
+    width: 210, height: 210, alignItems: 'center', justifyContent: 'center',
+    marginBottom: Spacing.md, position: 'relative',
+  },
+  pulseRing: {
+    position: 'absolute', width: 210, height: 210, borderRadius: 105,
+    borderWidth: 1, borderColor: Colors.primary + '33',
+  },
   outerRing: {
-    width: 220, height: 220, borderRadius: 110,
-    borderWidth: 8, borderColor: Colors.surfaceBorder,
+    width: 200, height: 200, borderRadius: 100, borderWidth: 8,
     alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.surface,
   },
-  progressArc: {
-    position: 'absolute', width: 220, height: 220, borderRadius: 110, borderWidth: 8,
-    borderTopColor: Colors.primary,
-  },
   innerCircle: { alignItems: 'center' },
-  countNum: { fontSize: 64, fontWeight: Typography.bold, color: Colors.primary, lineHeight: 72 },
-  countTarget: { fontSize: Typography.body, color: Colors.textSecondary },
-  completedBadge: {
-    marginTop: 4, backgroundColor: Colors.success + '33',
-    borderRadius: Radius.round, paddingHorizontal: 12, paddingVertical: 3,
+  countNum: { fontSize: 62, fontWeight: '700', color: Colors.primary, lineHeight: 70 },
+  countTarget: { fontSize: Typography.caption, color: Colors.textSecondary },
+  remainingText: { fontSize: Typography.small, color: Colors.textMuted, marginTop: 2 },
+  statsRow: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.md, width: '100%' },
+  statBox: {
+    flex: 1, alignItems: 'center', backgroundColor: Colors.surface,
+    borderRadius: Radius.md, paddingVertical: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.surfaceBorder,
   },
-  completedText: { fontSize: Typography.caption, color: Colors.success, fontWeight: Typography.bold },
-  dhikrArabic: { fontSize: 28, color: Colors.textArabic, textAlign: 'center', lineHeight: 46, marginBottom: 4 },
-  dhikrTranslit: { fontSize: Typography.caption, color: Colors.textSecondary, fontStyle: 'italic', textAlign: 'center' },
-  dhikrTranslation: { fontSize: Typography.body, color: Colors.textPrimary, textAlign: 'center', marginTop: 4, marginBottom: Spacing.md },
-  controls: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xl },
-  controlBtn: { alignItems: 'center', gap: 4 },
-  controlText: { fontSize: Typography.small, fontWeight: Typography.medium },
-  totalBadge: {
-    alignItems: 'center', backgroundColor: Colors.surface,
-    borderRadius: Radius.md, paddingHorizontal: 20, paddingVertical: 8,
-    borderWidth: 1, borderColor: Colors.primary,
+  statBoxMain: { borderColor: Colors.primary + '55', backgroundColor: Colors.overlayLight },
+  statNum: { fontSize: Typography.h3, fontWeight: '700', color: Colors.textPrimary },
+  statLabel: { fontSize: Typography.small, color: Colors.textMuted },
+  controls: { flexDirection: 'row', gap: Spacing.md },
+  controlBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 20, paddingVertical: 10,
+    borderRadius: Radius.round, borderWidth: 1,
+    backgroundColor: Colors.surface,
   },
-  totalLabel: { fontSize: Typography.small, color: Colors.textSecondary },
-  totalNum: { fontSize: Typography.h3, fontWeight: Typography.bold, color: Colors.primary },
-  dhikrList: { paddingHorizontal: Spacing.md },
-  dhikrListTitle: { fontSize: Typography.h4, fontWeight: Typography.semiBold, color: Colors.textPrimary, marginBottom: Spacing.sm },
+  controlText: { fontSize: Typography.body, fontWeight: '600' },
+
+  // Dhikr list
+  dhikrList: { paddingHorizontal: Spacing.md, marginTop: Spacing.sm },
+  dhikrListTitle: { fontSize: Typography.h4, fontWeight: '600', color: Colors.textPrimary, marginBottom: Spacing.sm },
   dhikrOption: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.surface,
     borderRadius: Radius.md, padding: Spacing.sm + 2, marginBottom: Spacing.xs,
     borderWidth: 1, borderColor: Colors.surfaceBorder, gap: Spacing.sm,
   },
   dhikrOptionActive: { borderColor: Colors.primary, backgroundColor: Colors.overlayLight },
-  dhikrOptAr: { fontSize: 17, color: Colors.textArabic },
-  dhikrOptEn: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 2 },
-  dhikrOptCount: { fontSize: Typography.caption, color: Colors.textMuted, fontWeight: Typography.bold },
-  // Hadith
-  collectionsGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: Spacing.md, gap: Spacing.sm, marginBottom: Spacing.sm },
+  dhikrOptAr: { fontSize: 18, color: Colors.textArabic, marginBottom: 2 },
+  dhikrOptTranslit: { fontSize: Typography.small, color: Colors.primary, fontStyle: 'italic', marginBottom: 2 },
+  dhikrOptEn: { fontSize: Typography.small, color: Colors.textSecondary },
+  dhikrOptRight: { alignItems: 'center', gap: 4 },
+  countChip: {
+    backgroundColor: Colors.overlayLight, borderRadius: Radius.round,
+    paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: Colors.primary + '44',
+  },
+  countChipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dhikrOptCount: { fontSize: Typography.caption, color: Colors.primary, fontWeight: '700' },
+
+  // ── Hadith ────────────────────────────────────────────────────────────────
+  hadithSubtitle: {
+    fontSize: Typography.caption, color: Colors.textSecondary, fontStyle: 'italic',
+    paddingHorizontal: Spacing.md, marginBottom: Spacing.md, marginTop: 4,
+  },
+  collectionsGrid: { paddingHorizontal: Spacing.md, gap: Spacing.sm },
   collCard: {
-    width: '47%', backgroundColor: Colors.surface,
-    borderRadius: Radius.lg, padding: Spacing.sm + 4, borderWidth: 1,
+    backgroundColor: Colors.surface, borderRadius: Radius.lg,
+    padding: Spacing.md, borderWidth: 1, position: 'relative',
   },
-  collDot: { width: 10, height: 10, borderRadius: 5, marginBottom: Spacing.xs },
-  collName: { fontSize: Typography.caption, fontWeight: Typography.bold, color: Colors.textPrimary },
-  collAr: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 1 },
-  collAuthor: { fontSize: Typography.small, color: Colors.textMuted, marginTop: 2 },
-  collCount: { fontSize: Typography.small, fontWeight: Typography.bold, marginTop: 6 },
-  hadithCard: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
-  hadithHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
-  hadithNum: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: Colors.overlayLight, borderWidth: 1, borderColor: Colors.primary,
-    alignItems: 'center', justifyContent: 'center',
+  collHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: Radius.sm, padding: 8, marginBottom: Spacing.sm },
+  collDot: { width: 10, height: 10, borderRadius: 5 },
+  collName: { fontSize: Typography.body, fontWeight: '700' },
+  collAr: { fontSize: Typography.caption, color: Colors.textSecondary, marginTop: 2 },
+  collAuthor: { fontSize: Typography.small, color: Colors.textMuted, marginTop: 4, lineHeight: 18 },
+  collFooter: { flexDirection: 'row', alignItems: 'baseline', marginTop: 8 },
+  collCount: { fontSize: Typography.h3, fontWeight: '700' },
+  collCountLabel: { fontSize: Typography.caption, color: Colors.textMuted },
+  collArrow: {
+    position: 'absolute', right: Spacing.md, bottom: Spacing.md,
   },
-  hadithNumText: { fontSize: Typography.caption, fontWeight: Typography.bold, color: Colors.primary },
-  hadithNarrator: { flex: 1, fontSize: Typography.caption, color: Colors.textSecondary },
-  gradeBadge: { backgroundColor: Colors.success + '22', borderRadius: Radius.round, paddingHorizontal: 8, paddingVertical: 2 },
-  gradeText: { fontSize: Typography.small, color: Colors.success, fontWeight: Typography.bold },
-  hadithArabic: { fontSize: 18, color: Colors.textArabic, textAlign: 'right', lineHeight: 34, marginBottom: Spacing.sm, writingDirection: 'rtl' },
-  hadithTranslation: { fontSize: Typography.body, color: Colors.textPrimary, lineHeight: 22, marginBottom: Spacing.sm },
-  catBadge: { backgroundColor: Colors.overlayLight, borderRadius: Radius.round, paddingHorizontal: 10, paddingVertical: 3, alignSelf: 'flex-start' },
-  catText: { fontSize: Typography.small, color: Colors.primary, fontWeight: Typography.medium },
-  // Settings
+
+  // ── Settings ──────────────────────────────────────────────────────────────
   settingLink: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     marginHorizontal: Spacing.md, marginBottom: Spacing.sm,
@@ -413,24 +452,29 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.surfaceBorder,
   },
   settingIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  settingLinkTitle: { fontSize: Typography.body, fontWeight: Typography.semiBold, color: Colors.textPrimary },
+  settingLinkTitle: { fontSize: Typography.body, fontWeight: '600', color: Colors.textPrimary },
   settingLinkSub: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 2 },
   settingGroup: { marginHorizontal: Spacing.md, marginBottom: Spacing.md },
-  settingGroupTitle: { fontSize: Typography.h4, fontWeight: Typography.semiBold, color: Colors.textPrimary, marginBottom: Spacing.sm },
+  settingGroupTitle: { fontSize: Typography.h4, fontWeight: '600', color: Colors.textPrimary, marginBottom: Spacing.sm },
   settingRow: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.sm,
     backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.sm + 4,
     borderWidth: 1, borderColor: Colors.surfaceBorder, marginBottom: Spacing.xs,
   },
-  settingLabel: { fontSize: Typography.body, fontWeight: Typography.medium, color: Colors.textPrimary },
+  settingLabel: { fontSize: Typography.body, fontWeight: '500', color: Colors.textPrimary },
   settingDesc: { fontSize: Typography.small, color: Colors.textSecondary, marginTop: 2 },
   settingBlockLabel: { paddingTop: Spacing.sm, paddingBottom: 4 },
   fontSizeControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   fontBtn: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: Colors.surface,
+    width: 34, height: 34, borderRadius: 17, backgroundColor: Colors.surface,
     alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.surfaceBorder,
   },
-  fontSizeValue: { fontSize: Typography.body, fontWeight: Typography.bold, color: Colors.primary, minWidth: 28, textAlign: 'center' },
+  fontSizeValue: { fontSize: Typography.body, fontWeight: '700', color: Colors.primary, minWidth: 28, textAlign: 'center' },
+  fontPreview: {
+    backgroundColor: Colors.surface, borderRadius: Radius.md, padding: Spacing.md,
+    alignItems: 'center', marginBottom: Spacing.sm, borderWidth: 1, borderColor: Colors.surfaceBorder,
+  },
+  fontPreviewText: { color: Colors.textArabic, lineHeight: 60 },
   transOption: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     padding: Spacing.sm + 2, borderRadius: Radius.sm, marginBottom: 2,
@@ -439,7 +483,11 @@ const styles = StyleSheet.create({
   transOptionActive: { backgroundColor: Colors.overlayLight, borderColor: Colors.primary },
   transOptionText: { fontSize: Typography.body, color: Colors.textPrimary },
   aboutCard: { marginHorizontal: Spacing.md, alignItems: 'center', marginBottom: Spacing.md },
-  aboutTitle: { fontSize: Typography.h3, fontWeight: Typography.bold, color: Colors.primary },
+  aboutLogo: {
+    width: 64, height: 64, borderRadius: 32, backgroundColor: Colors.overlayLight,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.primary + '55', marginBottom: 8,
+  },
+  aboutTitle: { fontSize: Typography.h3, fontWeight: '700', color: Colors.primary },
   aboutTitleAr: { fontSize: Typography.arabicSM, color: Colors.textArabic, marginTop: 2 },
   aboutDesc: { fontSize: Typography.caption, color: Colors.textSecondary, textAlign: 'center', marginTop: Spacing.sm, lineHeight: 20 },
   aboutVersion: { fontSize: Typography.small, color: Colors.textMuted, marginTop: 6 },

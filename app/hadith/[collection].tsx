@@ -1,71 +1,176 @@
 // Powered by OnSpace.AI
-import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from 'react-native';
+// Real Hadith from hadith.gading.dev API with search + infinite scroll
+
+import React, { useState, useCallback } from 'react';
+import {
+  View, Text, FlatList, TextInput, StyleSheet, Pressable,
+  ActivityIndicator, Share,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, Typography, Spacing, Radius } from '@/constants/theme';
-import { HADITH_COLLECTIONS, FORTY_NAWAWI } from '@/constants/hadithData';
-import IslamicCard from '@/components/ui/IslamicCard';
+import { useHadithCollection, HADITH_COLLECTIONS_META } from '@/hooks/useHadith';
+import type { HadithItem } from '@/services/hadithApiService';
+
+function HadithCard({ hadith, collectionColor }: { hadith: HadithItem; collectionColor: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const MAX_CHARS = 220;
+  const longTranslation = hadith.id.length > MAX_CHARS;
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `${hadith.arab}\n\n${hadith.id}\n\nHadith #${hadith.number}`,
+        title: `Hadith #${hadith.number}`,
+      });
+    } catch {}
+  };
+
+  return (
+    <View style={styles.hadithCard}>
+      {/* Number badge */}
+      <View style={styles.hadithHeader}>
+        <View style={[styles.hadithNum, { borderColor: collectionColor + '88' }]}>
+          <Text style={[styles.hadithNumText, { color: collectionColor }]}>{hadith.number}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={[styles.authBadge, { backgroundColor: collectionColor + '15' }]}>
+            <Text style={[styles.authText, { color: collectionColor }]}>Hadith #{hadith.number}</Text>
+          </View>
+        </View>
+        <Pressable onPress={handleShare} hitSlop={8}>
+          <MaterialIcons name="share" size={18} color={Colors.textSecondary} />
+        </Pressable>
+      </View>
+
+      {/* Arabic text */}
+      <Text style={styles.hadithArabic}>{hadith.arab}</Text>
+
+      {/* Divider */}
+      <View style={[styles.hadithDivider, { backgroundColor: collectionColor + '33' }]} />
+
+      {/* Translation */}
+      <Text style={styles.hadithTranslation} numberOfLines={expanded ? undefined : 4}>
+        {hadith.id}
+      </Text>
+
+      {longTranslation ? (
+        <Pressable onPress={() => setExpanded(e => !e)} style={styles.expandBtn}>
+          <Text style={styles.expandText}>{expanded ? 'Show less' : 'Read more'}</Text>
+          <MaterialIcons
+            name={expanded ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+            size={16}
+            color={Colors.primary}
+          />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 export default function HadithCollectionScreen() {
   const { collection } = useLocalSearchParams<{ collection: string }>();
   const router = useRouter();
-  const [query, setQuery] = useState('');
-  const colInfo = HADITH_COLLECTIONS.find(c => c.id === collection);
-  const data = collection === '40nawawi' ? FORTY_NAWAWI : FORTY_NAWAWI;
 
-  const filtered = query.trim()
-    ? data.filter(h => h.translation.toLowerCase().includes(query.toLowerCase()) || h.arabic.includes(query))
-    : data;
+  const {
+    hadiths, loading, loadingMore, error, hasMore, meta,
+    searchQuery, setSearchQuery, loadMore, reload,
+  } = useHadithCollection(collection ?? 'bukhari');
+
+  const collectionColor = meta?.color ?? Colors.primary;
+
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    return (
+      <View style={styles.footerLoader}>
+        <ActivityIndicator size="small" color={Colors.primary} />
+        <Text style={styles.footerText}>Loading more hadiths...</Text>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: collectionColor + '44' }]}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
           <MaterialIcons name="arrow-back" size={24} color={Colors.textPrimary} />
         </Pressable>
         <View style={styles.headerCenter}>
-          <Text style={styles.title}>{colInfo?.name ?? 'Hadith'}</Text>
-          <Text style={styles.arabic}>{colInfo?.nameArabic}</Text>
+          <Text style={styles.title}>{meta?.name ?? 'Hadith'}</Text>
+          <Text style={styles.titleAr}>{meta?.nameArabic ?? ''}</Text>
         </View>
-        <View style={{ width: 32 }} />
+        <Pressable onPress={reload} hitSlop={8}>
+          <MaterialIcons name="refresh" size={22} color={loading ? collectionColor : Colors.textSecondary} />
+        </Pressable>
       </View>
 
+      {/* Meta info */}
+      {meta ? (
+        <View style={[styles.metaBar, { borderLeftColor: collectionColor }]}>
+          <Text style={styles.metaAuthor}>{meta.author}</Text>
+          <View style={[styles.totalBadge, { backgroundColor: collectionColor + '15' }]}>
+            <Text style={[styles.totalText, { color: collectionColor }]}>
+              {meta.total.toLocaleString()} hadiths
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Search */}
       <View style={styles.searchBar}>
-        <MaterialIcons name="search" size={20} color={Colors.textSecondary} />
+        <MaterialIcons name="search" size={18} color={Colors.textSecondary} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search hadiths..."
           placeholderTextColor={Colors.textMuted}
-          value={query}
-          onChangeText={setQuery}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          accessibilityLabel="Search hadiths"
         />
+        {searchQuery.length > 0 ? (
+          <Pressable onPress={() => setSearchQuery('')} hitSlop={8}>
+            <MaterialIcons name="close" size={16} color={Colors.textSecondary} />
+          </Pressable>
+        ) : null}
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {filtered.map(hadith => (
-          <IslamicCard key={hadith.id} style={styles.card}>
-            <View style={styles.cardHeader}>
-              <View style={styles.numBadge}>
-                <Text style={styles.numText}>{hadith.hadithNumber}</Text>
-              </View>
-              <Text style={styles.narrator}>{hadith.narrator}</Text>
-              <View style={styles.gradeBadge}>
-                <Text style={styles.grade}>{hadith.grade}</Text>
-              </View>
+      {error ? (
+        <View style={styles.errBanner}>
+          <MaterialIcons name="wifi-off" size={14} color={Colors.error} />
+          <Text style={styles.errText}>{error}</Text>
+          <Pressable onPress={reload}>
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <FlatList
+        data={hadiths}
+        keyExtractor={item => `${item.number}`}
+        renderItem={({ item }) => (
+          <HadithCard hadith={item} collectionColor={collectionColor} />
+        )}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContent}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={renderFooter}
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.center}>
+              <ActivityIndicator size="large" color={collectionColor} />
+              <Text style={styles.loadText}>Loading {meta?.name}...</Text>
             </View>
-            <Text style={styles.arabic}>{hadith.arabic}</Text>
-            <Text style={styles.translation}>{hadith.translation}</Text>
-            <View style={styles.footer}>
-              <View style={styles.catBadge}>
-                <Text style={styles.catText}>{hadith.category}</Text>
-              </View>
+          ) : (
+            <View style={styles.center}>
+              <MaterialIcons name="search-off" size={48} color={Colors.textMuted} />
+              <Text style={styles.emptyText}>No hadiths found</Text>
             </View>
-          </IslamicCard>
-        ))}
-        <View style={{ height: Spacing.xl }} />
-      </ScrollView>
+          )
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -73,43 +178,69 @@ export default function HadithCollectionScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 12,
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: Spacing.md, paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.surfaceBorder,
   },
   headerCenter: { flex: 1, alignItems: 'center' },
-  title: { fontSize: Typography.h4, fontWeight: Typography.bold, color: Colors.textPrimary },
-  arabic: { fontSize: Typography.caption, color: Colors.primary, marginTop: 2 },
+  title: { fontSize: Typography.h4, fontWeight: '700', color: Colors.textPrimary },
+  titleAr: { fontSize: Typography.small, color: Colors.primary, marginTop: 2 },
+  metaBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: Spacing.md, paddingVertical: 8,
+    borderLeftWidth: 3, marginHorizontal: Spacing.md, marginTop: 8,
+    backgroundColor: Colors.surface, borderRadius: Radius.sm,
+    borderWidth: 1, borderColor: Colors.surfaceBorder,
+  },
+  metaAuthor: { fontSize: Typography.caption, color: Colors.textSecondary, flex: 1, flexWrap: 'wrap' },
+  totalBadge: { borderRadius: Radius.round, paddingHorizontal: 10, paddingVertical: 4 },
+  totalText: { fontSize: Typography.caption, fontWeight: '700' },
   searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    margin: Spacing.md,
-    paddingHorizontal: Spacing.sm + 4,
-    paddingVertical: 10,
-    gap: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.surfaceBorder,
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: Colors.surface, borderRadius: Radius.md,
+    marginHorizontal: Spacing.md, marginVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm + 4, paddingVertical: 10,
+    gap: Spacing.sm, borderWidth: 1, borderColor: Colors.surfaceBorder,
   },
   searchInput: { flex: 1, fontSize: Typography.body, color: Colors.textPrimary },
-  card: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
-  numBadge: {
-    width: 34, height: 34, borderRadius: 17,
-    backgroundColor: Colors.overlayLight, borderWidth: 1, borderColor: Colors.primary,
+  errBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginHorizontal: Spacing.md, marginBottom: 4, padding: 8,
+    backgroundColor: Colors.error + '15', borderRadius: Radius.sm,
+  },
+  errText: { flex: 1, fontSize: Typography.small, color: Colors.textSecondary },
+  retryText: { fontSize: Typography.small, color: Colors.primary, fontWeight: '700' },
+  listContent: { paddingHorizontal: Spacing.md, paddingBottom: 30 },
+  hadithCard: {
+    backgroundColor: Colors.surface, borderRadius: Radius.lg,
+    padding: Spacing.md, marginBottom: Spacing.sm,
+    borderWidth: 1, borderColor: Colors.surfaceBorder,
+  },
+  hadithHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, marginBottom: Spacing.sm },
+  hadithNum: {
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: Colors.overlayLight, borderWidth: 1,
     alignItems: 'center', justifyContent: 'center',
   },
-  numText: { fontSize: Typography.small, fontWeight: Typography.bold, color: Colors.primary },
-  narrator: { flex: 1, fontSize: Typography.caption, color: Colors.textSecondary },
-  gradeBadge: { backgroundColor: Colors.success + '22', borderRadius: Radius.round, paddingHorizontal: 8, paddingVertical: 2 },
-  grade: { fontSize: Typography.small, color: Colors.success, fontWeight: Typography.bold },
-  arabic: { fontSize: 18, color: Colors.textArabic, textAlign: 'right', lineHeight: 34, marginBottom: Spacing.sm, writingDirection: 'rtl' },
-  translation: { fontSize: Typography.body, color: Colors.textPrimary, lineHeight: 22, marginBottom: Spacing.sm },
-  footer: { flexDirection: 'row' },
-  catBadge: { backgroundColor: Colors.overlayLight, borderRadius: Radius.round, paddingHorizontal: 10, paddingVertical: 3 },
-  catText: { fontSize: Typography.small, color: Colors.primary, fontWeight: Typography.medium },
+  hadithNumText: { fontSize: Typography.caption, fontWeight: '700' },
+  authBadge: { borderRadius: Radius.round, paddingHorizontal: 10, paddingVertical: 3, alignSelf: 'flex-start' },
+  authText: { fontSize: Typography.small, fontWeight: '600' },
+  hadithArabic: {
+    fontSize: 19, color: Colors.textArabic, textAlign: 'right',
+    lineHeight: 36, writingDirection: 'rtl', marginBottom: Spacing.sm,
+  },
+  hadithDivider: { height: 1, marginVertical: Spacing.sm },
+  hadithTranslation: {
+    fontSize: Typography.body, color: Colors.textPrimary, lineHeight: 23,
+  },
+  expandBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 6,
+    alignSelf: 'flex-start',
+  },
+  expandText: { fontSize: Typography.caption, color: Colors.primary, fontWeight: '600' },
+  footerLoader: { alignItems: 'center', paddingVertical: Spacing.md, gap: 6, flexDirection: 'row', justifyContent: 'center' },
+  footerText: { fontSize: Typography.caption, color: Colors.textSecondary },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, padding: Spacing.xl, minHeight: 300 },
+  loadText: { fontSize: Typography.body, color: Colors.textSecondary },
+  emptyText: { fontSize: Typography.body, color: Colors.textMuted },
 });
