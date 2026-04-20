@@ -161,6 +161,7 @@ export default function RadioScreen() {
         </View>
       ) : activeTab === 'Radio' ? (
         <FlatList
+          key="radio-list"
           data={radioStations}
           keyExtractor={item => String(item.id)}
           renderItem={({ item }) => (
@@ -181,6 +182,7 @@ export default function RadioScreen() {
         />
       ) : (
         <FlatList
+          key="tv-grid"
           data={tvStations}
           keyExtractor={item => String(item.id)}
           numColumns={2}
